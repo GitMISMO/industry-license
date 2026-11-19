@@ -6,6 +6,7 @@ downloads json, cms company-contacts json, act25 json, output dir.
 import json, re, sys, csv, os, collections
 
 (apt_p, terms_p, enc_p, fan_p, fred_p, dl_p, cms_p, act25_p, out_d) = sys.argv[1:10]
+extra_ps = sys.argv[10:]  # more Aptify files with OrdersSince2025 and AptifyType columns
 TODAY = '2026-11-18'
 
 SUFFIX = r"\b(inc|incorporated|llc|l l c|ltd|limited|corp|corporation|company|co|lp|llp|pllc|plc|the|dba|na|n a|a|an|of|and)\b"
@@ -64,6 +65,14 @@ with open(apt_p, encoding='utf-8') as f:
 
 terms = json.load(open(terms_p))['doc']['terms']
 act25 = json.load(open(act25_p))
+for r in rows:
+    r.setdefault('AptifyType', 'Technology Solution Provider' if r['CompanyType'] == 'Tech' else 'Professional Services Provider')
+for ep in extra_ps:
+    with open(ep, encoding='utf-8') as f:
+        for r in csv.DictReader(f, delimiter='|'):
+            if r.get('OrdersSince2025') not in (None, ''):
+                act25[str(r['AptifyCompanyID'])] = int(r['OrdersSince2025'])
+            rows.append(r)
 
 
 def mismo_status(cid):
@@ -199,7 +208,7 @@ for r in rows:
         biz = 'Check'
         biz_why = 'Last Aptify activity was 2022-2024 and no current list shows them; needs a web check'
     out.append({
-        'id': cid, 'name': name, 'type': r['CompanyType'], 'mbaMember': r['MBAMemberType'],
+        'id': cid, 'name': name, 'type': r['CompanyType'], 'aptifyType': r['AptifyType'], 'mbaMember': r['MBAMemberType'],
         'city': r['City'], 'state': r['State'], 'ordersSince2022': orders, 'firstOrderSince2022': r['FirstOrderSince2022'],
         'ordersSince2025': a25, 'mismo': st, 'mismoLevel': lv, 'mismoEnd': end,
         'list': 'B' if st == 'Current' else ('A' if orders > 0 else None),
@@ -212,10 +221,10 @@ json.dump({'built': TODAY, 'companies': out}, open(os.path.join(out_d, 'companie
 for lst in ('A', 'B'):
     with open(os.path.join(out_d, 'list-%s.csv' % lst), 'w', newline='') as f:
         w = csv.writer(f)
-        w.writerow(['Aptify ID', 'Company', 'Type', 'MBA Member Type', 'MISMO Status', 'Last MISMO Level', 'MISMO Term End',
+        w.writerow(['Aptify ID', 'Company', 'Type', 'Aptify Company Type', 'MBA Member Type', 'MISMO Status', 'Last MISMO Level', 'MISMO Term End',
                     'Orders Since 2022', 'Orders Since 2025', 'Still in Business', 'Why', 'Uses MISMO Standards', 'Why'])
         for c in sorted([c for c in out if c['list'] == lst], key=lambda c: c['name'].lower()):
-            w.writerow([c['id'], c['name'], c['type'], c['mbaMember'], c['mismo'], c['mismoLevel'] or '', c['mismoEnd'] or '',
+            w.writerow([c['id'], c['name'], c['type'], c['aptifyType'], c['mbaMember'], c['mismo'], c['mismoLevel'] or '', c['mismoEnd'] or '',
                         c['ordersSince2022'], c['ordersSince2025'] if c['ordersSince2025'] is not None else '',
                         c['inBusiness'], c['inBusinessWhy'], c['usesStandards'], ' | '.join(c['usesWhy'])])
 
