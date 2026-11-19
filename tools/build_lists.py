@@ -8,6 +8,12 @@ import json, re, sys, csv, os, collections
 (apt_p, terms_p, enc_p, fan_p, fred_p, dl_p, cms_p, act25_p, out_d) = sys.argv[1:10]
 extra_ps = [a for a in sys.argv[10:] if not a.startswith('--sites=')]  # more Aptify files
 sites_p = next((a[8:] for a in sys.argv[10:] if a.startswith('--sites=')), None)
+research_p = next((a[11:] for a in sys.argv[10:] if a.startswith('--research=')), None)
+extra_ps = [a for a in extra_ps if not a.startswith('--research=')]
+RESEARCH = {}
+if research_p and os.path.exists(research_p):
+    RESEARCH = {k: v for k, v in json.load(open(research_p)).get('results', {}).items() if 'error' not in v}
+RANK = {'Low': 0, 'Medium': 1, 'High': 2}
 SITES = {}
 if sites_p:
     for line in open(sites_p, encoding='utf-8'):
@@ -219,13 +225,29 @@ for r in rows:
         why.append(('website %s does not respond' % site['site']) if site.get('site') else 'no website in Aptify')
         why.append('no Aptify activity since 2024 and not on any current list')
     biz_why = '; '.join(why)
+    web = RESEARCH.get(str(cid))
+    if web:
+        tag = 'Web check %s' % web.get('checked', '')
+        rb, ru = web.get('in_business'), web.get('uses_mismo')
+        if rb in RANK and biz != 'High':
+            biz = rb
+        biz_why += '; %s: %s' % (tag, web.get('in_business_reason', ''))
+        if web.get('acquired_by'):
+            biz_why += ' (acquired by %s)' % web['acquired_by']
+        if ru in RANK:
+            if RANK[ru] > RANK[score]:
+                score = ru
+            if reasons and reasons[0].startswith('No sign of MISMO'):
+                reasons = []
+            reasons.append('%s: %s%s' % (tag, web.get('uses_mismo_reason', ''),
+                                         (' Sources: ' + ', '.join(web.get('sources') or [])) if web.get('sources') else ''))
     out.append({
         'id': cid, 'name': name, 'type': r['CompanyType'], 'aptifyType': r['AptifyType'], 'mbaMember': r['MBAMemberType'],
         'city': r['City'], 'state': r['State'], 'ordersSince2022': orders, 'firstOrderSince2022': r['FirstOrderSince2022'],
         'ordersSince2025': a25, 'mismo': st, 'mismoLevel': lv, 'mismoEnd': end,
         'list': 'B' if st == 'Current' else ('A' if orders > 0 else None),
         'usesStandards': score, 'usesWhy': reasons, 'inBusiness': biz, 'inBusinessWhy': biz_why,
-        'website': site.get('site', ''), 'websiteUp': site.get('up'),
+        'website': site.get('site', ''), 'websiteUp': site.get('up'), 'webChecked': bool(web),
         'evidence': ev,
     })
 
