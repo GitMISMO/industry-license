@@ -6,7 +6,14 @@ downloads json, cms company-contacts json, act25 json, output dir.
 import json, re, sys, csv, os, collections
 
 (apt_p, terms_p, enc_p, fan_p, fred_p, dl_p, cms_p, act25_p, out_d) = sys.argv[1:10]
-extra_ps = sys.argv[10:]  # more Aptify files with OrdersSince2025 and AptifyType columns
+extra_ps = [a for a in sys.argv[10:] if not a.startswith('--sites=')]  # more Aptify files
+sites_p = next((a[8:] for a in sys.argv[10:] if a.startswith('--sites=')), None)
+SITES = {}
+if sites_p:
+    for line in open(sites_p, encoding='utf-8'):
+        parts = line.rstrip('\n').split('|')
+        if len(parts) >= 3 and parts[0].isdigit():
+            SITES[parts[0]] = {'site': parts[1], 'up': parts[2] == '1'}
 TODAY = '2026-11-18'
 
 SUFFIX = r"\b(inc|incorporated|llc|l l c|ltd|limited|corp|corporation|company|co|lp|llp|pllc|plc|the|dba|na|n a|a|an|of|and)\b"
@@ -192,27 +199,33 @@ for r in rows:
         reasons.append('No sign of MISMO standards in the GSE lists, Encompass Partner Connect, MISMO certifications or 2026 website downloads.')
     a25 = act25.get(str(cid))
     on_current_list = any(e['source'] != 'MISMO website downloads (May-Sep 2026)' for e in ev)
-    if (a25 and a25 > 0) or on_current_list or weak or med and any('downloads' in e['source'] for e in med) or st == 'Current':
-        biz = 'Likely'
-        why = []
-        if a25 and a25 > 0:
-            why.append('%d Aptify orders since Jan 2025' % a25)
-        if on_current_list:
-            why.append('on a current partner or GSE list')
-        if any('downloads' in e['source'] for e in ev):
-            why.append('downloaded from mismo.org in 2026')
-        if st == 'Current':
-            why.append('current MISMO member')
-        biz_why = '; '.join(why)
+    site = SITES.get(str(cid), {})
+    why = []
+    if a25 and a25 > 0:
+        why.append('%d Aptify orders since Jan 2025' % a25)
+    if on_current_list:
+        why.append('on a current partner or GSE list')
+    if any('downloads' in e['source'] for e in ev):
+        why.append('downloaded from mismo.org in 2026')
+    if st == 'Current':
+        why.append('current MISMO member')
+    if why:
+        biz = 'High'
+    elif site.get('up'):
+        biz = 'Medium'
+        why.append('website %s responds, but no Aptify activity since 2024' % site['site'])
     else:
-        biz = 'Check'
-        biz_why = 'Last Aptify activity was 2022-2024 and no current list shows them; needs a web check'
+        biz = 'Low'
+        why.append(('website %s does not respond' % site['site']) if site.get('site') else 'no website in Aptify')
+        why.append('no Aptify activity since 2024 and not on any current list')
+    biz_why = '; '.join(why)
     out.append({
         'id': cid, 'name': name, 'type': r['CompanyType'], 'aptifyType': r['AptifyType'], 'mbaMember': r['MBAMemberType'],
         'city': r['City'], 'state': r['State'], 'ordersSince2022': orders, 'firstOrderSince2022': r['FirstOrderSince2022'],
         'ordersSince2025': a25, 'mismo': st, 'mismoLevel': lv, 'mismoEnd': end,
         'list': 'B' if st == 'Current' else ('A' if orders > 0 else None),
         'usesStandards': score, 'usesWhy': reasons, 'inBusiness': biz, 'inBusinessWhy': biz_why,
+        'website': site.get('site', ''), 'websiteUp': site.get('up'),
         'evidence': ev,
     })
 
@@ -222,10 +235,10 @@ for lst in ('A', 'B'):
     with open(os.path.join(out_d, 'list-%s.csv' % lst), 'w', newline='') as f:
         w = csv.writer(f)
         w.writerow(['Aptify ID', 'Company', 'Type', 'Aptify Company Type', 'MBA Member Type', 'MISMO Status', 'Last MISMO Level', 'MISMO Term End',
-                    'Orders Since 2022', 'Orders Since 2025', 'Still in Business', 'Why', 'Uses MISMO Standards', 'Why'])
+                    'Website', 'Orders Since 2022', 'Orders Since 2025', 'Still in Business', 'Why', 'Uses MISMO Standards', 'Why'])
         for c in sorted([c for c in out if c['list'] == lst], key=lambda c: c['name'].lower()):
             w.writerow([c['id'], c['name'], c['type'], c['aptifyType'], c['mbaMember'], c['mismo'], c['mismoLevel'] or '', c['mismoEnd'] or '',
-                        c['ordersSince2022'], c['ordersSince2025'] if c['ordersSince2025'] is not None else '',
+                        c['website'], c['ordersSince2022'], c['ordersSince2025'] if c['ordersSince2025'] is not None else '',
                         c['inBusiness'], c['inBusinessWhy'], c['usesStandards'], ' | '.join(c['usesWhy'])])
 
 summ = collections.Counter((c['list'], c['type'], c['usesStandards'], c['inBusiness']) for c in out if c['list'])
